@@ -31,6 +31,10 @@ var _ machinery.Template = &Golangci{}
 type Golangci struct {
 	machinery.TemplateMixin
 	machinery.ProjectNameMixin
+
+	// Overwrite causes the file to be overwritten if it already exists.
+	// By default the file is skipped to preserve custom lint rules.
+	Overwrite bool
 }
 
 // SetTemplateDefaults implements machinery.Template.
@@ -41,7 +45,11 @@ func (f *Golangci) SetTemplateDefaults() error {
 
 	f.TemplateBody = commontemplates.Linter
 
-	f.IfExistsAction = machinery.SkipFile
+	if f.Overwrite {
+		f.IfExistsAction = machinery.OverwriteFile
+	} else {
+		f.IfExistsAction = machinery.SkipFile
+	}
 
 	return nil
 }

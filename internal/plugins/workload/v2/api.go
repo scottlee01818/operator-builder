@@ -22,6 +22,7 @@ import (
 	"github.com/nukleros/operator-builder/internal/controllergen"
 	"github.com/nukleros/operator-builder/internal/plugins/workload"
 	"github.com/nukleros/operator-builder/internal/plugins/workload/v2/scaffolds"
+	scaffoldtmpls "github.com/nukleros/operator-builder/internal/plugins/workload/v2/scaffolds/templates"
 	"github.com/nukleros/operator-builder/internal/utils"
 	"github.com/nukleros/operator-builder/internal/workload/v1/commands/subcommand"
 	workloadconfig "github.com/nukleros/operator-builder/internal/workload/v1/config"
@@ -45,6 +46,14 @@ type createAPISubcommand struct {
 	cliRootCommandName string
 	workload           kinds.WorkloadBuilder
 	enableOlm          bool
+	controllerImg      string // preserved from init for --makefile / --readme
+
+	// init-level file update flags (all default false; written once at init time)
+	updateGomod      bool
+	updateDockerfile bool
+	updateLint       bool
+	updateMakefile   bool
+	updateReadme     bool
 }
 
 var (
@@ -83,9 +92,25 @@ func (p *createAPISubcommand) BindFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&p.options.DoController, "controller", true,
 		"if set, generate the controller without prompting the user")
 	p.controllerFlag = fs.Lookup("controller")
+
+	// init-level file update flags — regenerate files that are normally written
+	// only once at project initialisation.
+	fs.BoolVar(&p.updateGomod, "gomod", false, "update the go.mod file from the latest template")
+	fs.BoolVar(&p.updateDockerfile, "dockerfile", false, "update the Dockerfile from the latest template")
+	fs.BoolVar(&p.updateLint, "lint", false, "update .golangci.yml from the latest template")
+	fs.BoolVar(&p.updateMakefile, "makefile", false, "update the Makefile from the latest template")
+	fs.BoolVar(&p.updateReadme, "readme", false, "update README.md from the latest template")
 }
 
 func (p *createAPISubcommand) InjectConfig(c config.Config) error {
+	// Read the stored plugin config to preserve the controller image that was
+	// set at init time — needed by --makefile and --readme without requiring
+	// the user to re-supply it.
+	var stored workloadconfig.Plugin
+	if err := c.DecodePluginConfig(workloadconfig.PluginKey, &stored); err == nil {
+		p.controllerImg = stored.ControllerImg
+	}
+
 	processor, err := workloadconfig.Parse(p.workloadConfigPath)
 	if err != nil {
 		return fmt.Errorf("unable to inject config into %s, %w", p.workloadConfigPath, err)
@@ -97,6 +122,7 @@ func (p *createAPISubcommand) InjectConfig(c config.Config) error {
 	pluginConfig := workloadconfig.Plugin{
 		WorkloadConfigPath: p.workloadConfigPath,
 		CliRootCommandName: p.cliRootCommandName,
+		ControllerImg:      p.controllerImg,
 		EnableOLM:          p.enableOlm,
 	}
 
@@ -197,7 +223,58 @@ func (p *createAPISubcommand) Scaffold(fs machinery.Filesystem) error {
 		return fmt.Errorf("%s for %s, %w", ErrScaffoldInit.Error(), p.workloadConfigPath, err)
 	}
 
-	return nil
+	return p.scaffoldInitFiles(fs)
+}
+
+// scaffoldInitFiles overwrites init-level project files when the corresponding
+// flags are set.  These files are normally written once at `init` time; the
+// flags allow regenerating them from the latest templates without running a
+// full project initialisation.
+func (p *createAPISubcommand) scaffoldInitFiles(fs machinery.Filesystem) error {
+	var files []machinery.Builder
+
+	if p.updateGomod {
+		files = append(files, &scaffoldtmpls.GoMod{})
+	}
+
+	if p.updateDockerfile {
+		files = append(files, &scaffoldtmpls.Dockerfile{})
+	}
+
+	if p.updateLint {
+		files = append(files, &scaffoldtmpls.Golangci{Overwrite: true})
+	}
+
+	if p.updateMakefile {
+		files = append(files, &scaffoldtmpls.Makefile{
+			RootCmdName:              p.cliRootCommandName,
+			ControllerImg:            p.controllerImg,
+			EnableOLM:                p.enableOlm,
+			KustomizeVersion:         utils.KustomizeVersion,
+			ControllerToolsVersion:   utils.ControllerToolsVersion,
+			OperatorSDKVersion:       utils.OperatorSDKVersion,
+			ControllerRuntimeVersion: utils.ControllerRuntimeVersion,
+			EnvtestVersion:           utils.EnvtestVersion,
+			EnvtestK8SVersion:        utils.EnvtestK8SVersion,
+			GolangCILintVersion:      utils.GolangCILintVersion,
+		})
+	}
+
+	if p.updateReadme {
+		files = append(files, &scaffoldtmpls.Readme{
+			RootCmdName:   p.cliRootCommandName,
+			EnableOLM:     p.enableOlm,
+			ControllerImg: p.controllerImg,
+		})
+	}
+
+	if len(files) == 0 {
+		return nil
+	}
+
+	scaffold := machinery.NewScaffold(fs, machinery.WithConfig(p.config))
+
+	return scaffold.Execute(files...)
 }
 
 func (p *createAPISubcommand) PostScaffold() error {
