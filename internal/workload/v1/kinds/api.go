@@ -108,13 +108,13 @@ func (api *APIFields) GenerateAPISpec(kind string) string {
 			continue
 		}
 
-		mustWrite(buf.WriteString(fmt.Sprintf("// %s\n", c)))
+		mustWrite(fmt.Fprintf(&buf, "// %s\n", c))
 
 		hasComment = true
 	}
 
 	if !hasComment {
-		mustWrite(buf.WriteString(fmt.Sprintf("// %sSpec defines the desired state of %s.\n", kind, kind)))
+		mustWrite(fmt.Fprintf(&buf, "// %sSpec defines the desired state of %s.\n", kind, kind))
 	}
 
 	mustWrite(fmt.Fprintf(&buf, `type %[1]sSpec struct {
