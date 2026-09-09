@@ -338,7 +338,7 @@ func (ws *WorkloadSpec) applyStructMarkers() error {
 			continue
 		}
 
-		if err := ws.APISpecFields.SetStructComments(name, comments); err != nil {
+		if err := ws.APISpecFields.setStructComments(name, comments); err != nil {
 			return fmt.Errorf("%w: %w", ErrStructMarker, err)
 		}
 	}

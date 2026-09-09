@@ -1900,7 +1900,7 @@ func TestAPIFields_AddField(t *testing.T) {
 	}
 }
 
-func TestAPIFields_SetStructComments(t *testing.T) {
+func TestAPIFields_setCommentsAndDefault_pathResolution(t *testing.T) {
 	t.Parallel()
 
 	// build a tree with a nested struct by processing a field at "webstore.image"
@@ -1947,7 +1947,7 @@ func TestAPIFields_SetStructComments(t *testing.T) {
 			t.Parallel()
 			root := buildTree()
 
-			err := root.SetStructComments(tt.path, tt.comments)
+			err := root.setStructComments(tt.path, tt.comments)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("SetStructComments() error = %v, wantErr %v", err, tt.wantErr)
 			}

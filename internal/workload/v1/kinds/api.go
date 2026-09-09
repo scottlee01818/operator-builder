@@ -26,16 +26,17 @@ var (
 )
 
 type APIFields struct {
-	Name         string
-	StructName   string
+	Name       string
+	StructName string
+	Type       markers.FieldType
+	Tags       string
+	Comments   []string
+	Markers    []string
+	Children   []*APIFields
+	Default    string
+	Sample     string
+
 	manifestName string
-	Type         markers.FieldType
-	Tags         string
-	Comments     []string
-	Markers      []string
-	Children     []*APIFields
-	Default      string
-	Sample       string
 }
 
 func (api *APIFields) AddField(path string, fieldType markers.FieldType, comments []string, sample interface{}, hasDefault bool) error {
@@ -352,6 +353,55 @@ func (api *APIFields) setDefault(sampleVal interface{}) {
 	api.setSample(sampleVal)
 }
 
+// setStructComments traverses the APIFields tree along the dot-separated path
+// to find the FieldStruct node declared there, then delegates to
+// setCommentsAndDefault to apply the comments.  Returns
+// ErrStructMarkerMissingFields when the path does not resolve to a FieldStruct,
+// which means no field markers exist for that struct.
+func (api *APIFields) setStructComments(path string, comments []string) error {
+	parts := strings.Split(path, ".")
+	obj := api
+
+	for _, part := range parts {
+		var found *APIFields
+
+		var description string
+
+		for _, child := range obj.Children {
+			if child.Type != markers.FieldStruct {
+				continue
+			}
+
+			if child.manifestName == part {
+				// set the found object.  in this case the last one wins which is
+				// ok because we validate that the description is the same as the existing one if it exists.
+				found = child
+
+				if description != "" && description != child.Default {
+					return fmt.Errorf("%w: %q has conflicting descriptions %q and %q",
+						ErrOverwriteExistingValue,
+						path,
+						description,
+						child.Default,
+					)
+				}
+
+				description = child.Default
+			}
+		}
+
+		if found == nil {
+			return fmt.Errorf("%w: %q not found", ErrStructMarkerMissingFields, path)
+		}
+
+		obj = found
+	}
+
+	obj.setCommentsAndDefault(comments, nil, false)
+
+	return nil
+}
+
 // kubebuilderDefault returns the default value formatted for a
 // +kubebuilder:default= marker annotation.  Map types use JSON object notation
 // ({"key":"value"}), array types use kubebuilder brace notation ({"a","b"}),
@@ -394,12 +444,16 @@ func (api *APIFields) appendMarkers(apiMarkers ...string) {
 }
 
 func (api *APIFields) setCommentsAndDefault(comments []string, sampleVal interface{}, hasDefault bool) {
-	if hasDefault {
+	switch {
+	case api.Type == markers.FieldStruct:
+		// structs have no default/required distinction - they are always optional.
+		api.appendMarkers("+kubebuilder:validation:Optional")
+	case hasDefault:
 		api.setDefault(sampleVal)
-	} else if api.Type == markers.FieldStringMap {
+	case api.Type == markers.FieldStringMap:
 		// map[string]string is always optional: nil/absent is equivalent to an empty map.
 		api.setDefault(map[string]string{})
-	} else {
+	default:
 		api.appendMarkers("+kubebuilder:validation:Required")
 	}
 
@@ -517,41 +571,6 @@ func formatStringMapYAML(m map[string]string) string {
 	}
 
 	return strings.TrimSpace(string(out))
-}
-
-// SetStructComments traverses the APIFields tree along the dot-separated path
-// and sets Comments on the FieldStruct node found there.  Returns
-// ErrStructMarkerMissingFields when the path does not resolve to a FieldStruct,
-// which means no field markers exist for that struct.
-func (api *APIFields) SetStructComments(path string, comments []string) error {
-	parts := strings.Split(path, ".")
-	obj := api
-
-	for _, part := range parts {
-		var found *APIFields
-
-		for _, child := range obj.Children {
-			if child.manifestName == part {
-				found = child
-
-				break
-			}
-		}
-
-		if found == nil {
-			return fmt.Errorf("%w: %q not found", ErrStructMarkerMissingFields, path)
-		}
-
-		if found.Type != markers.FieldStruct {
-			return fmt.Errorf("%w: %q is not a struct", ErrStructMarkerMissingFields, path)
-		}
-
-		obj = found
-	}
-
-	obj.Comments = comments
-
-	return nil
 }
 
 func mustWrite(n int, err error) {
