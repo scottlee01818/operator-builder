@@ -358,6 +358,12 @@ func (api *APIFields) setDefault(sampleVal interface{}) {
 // setCommentsAndDefault to apply the comments.  Returns
 // ErrStructMarkerMissingFields when the path does not resolve to a FieldStruct,
 // which means no field markers exist for that struct.
+//
+// This only resolves a single struct marker's target node - it has no memory
+// of previously resolved paths, so it cannot on its own detect two separate
+// struct markers naming the same path. That is caught by the caller, which
+// sees every struct marker and can track which paths have already been set;
+// see (*WorkloadSpec).applyStructMarkers.
 func (api *APIFields) setStructComments(path string, comments []string) error {
 	parts := strings.Split(path, ".")
 	obj := api
@@ -365,33 +371,20 @@ func (api *APIFields) setStructComments(path string, comments []string) error {
 	for _, part := range parts {
 		var found *APIFields
 
-		var description string
-
 		for _, child := range obj.Children {
-			if child.Type != markers.FieldStruct {
-				continue
-			}
-
 			if child.manifestName == part {
-				// set the found object.  in this case the last one wins which is
-				// ok because we validate that the description is the same as the existing one if it exists.
 				found = child
 
-				if description != "" && description != child.Default {
-					return fmt.Errorf("%w: %q has conflicting descriptions %q and %q",
-						ErrOverwriteExistingValue,
-						path,
-						description,
-						child.Default,
-					)
-				}
-
-				description = child.Default
+				break
 			}
 		}
 
 		if found == nil {
 			return fmt.Errorf("%w: %q not found", ErrStructMarkerMissingFields, path)
+		}
+
+		if found.Type != markers.FieldStruct {
+			return fmt.Errorf("%w: %q is not a struct", ErrStructMarkerMissingFields, path)
 		}
 
 		obj = found

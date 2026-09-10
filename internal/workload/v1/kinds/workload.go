@@ -328,9 +328,17 @@ func (ws *WorkloadSpec) processManifests(markerTypes ...markers.MarkerType) erro
 // named path does not correspond to an existing struct node (because no field
 // markers were nested beneath it) is treated as a configuration error.
 func (ws *WorkloadSpec) applyStructMarkers() error {
+	seen := make(map[string]bool, len(ws.StructMarkers))
+
 	for _, sm := range ws.StructMarkers {
 		name := sm.GetName()
 		comments := sm.GetComments()
+
+		if seen[name] {
+			return fmt.Errorf("%w: duplicate struct marker for %q", ErrStructMarker, name)
+		}
+
+		seen[name] = true
 
 		if name == markers.StructRootName {
 			ws.APISpecFields.Comments = comments
